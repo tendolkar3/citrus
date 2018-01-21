@@ -3,6 +3,7 @@ import math
 from shapely.geometry import Point, LineString, Polygon
 from shapely.affinity import rotate
 import networkx as nx
+from core.lib.maps.utils import constants as c
 
 
 def convert_to_traffic_graph(intersections_inp, roads_inp):
@@ -103,11 +104,12 @@ def create_road(start_intersection, end_intersection, name, osmid, road_string):
     return road, sn1, sn2
 
 
-def get_node_coords(x1, y1, x2, y2, no_of_lanes=3, lane_width=4):
+def get_node_coords(x1, y1, x2, y2, no_of_lanes=c.NO_OF_LANES, lane_width=c.LANE_WIDTH):
 
     """
     The offset in Point(_ , _) varies if the road is a one way. For now, we only assume two way roads. So each pair of
     intersections has two nodes each along the line joining them, one point each for the one side of the road.
+    Right now, assumes a straight road.
     :param x1:
     :param y1:
     :param x2:
@@ -131,3 +133,66 @@ def get_node_coords(x1, y1, x2, y2, no_of_lanes=3, lane_width=4):
     return [(x1 + os2.coords[0][0], y1 + os2.coords[0][1]), (x1 + oe2.coords[0][0], y1 + oe2.coords[0][1])]
 
 
+def create_sample_network():
+
+    """
+    Creates a sample graph.
+    :return:
+    """
+    intersections_inp = dict()
+
+    intersections_inp["i1"] = (50, 0)
+    intersections_inp["i2"] = (50, 50)
+    intersections_inp["i3"] = (0, 50)
+    intersections_inp["i4"] = (150, 0)
+    intersections_inp["i5"] = (150, 50)
+    intersections_inp["i6"] = (200, 50)
+    intersections_inp["i7"] = (0, 150)
+    intersections_inp["i8"] = (50, 150)
+    intersections_inp["i9"] = (50, 200)
+    intersections_inp["i10"] = (150, 200)
+    intersections_inp["i11"] = (150, 150)
+    intersections_inp["i12"] = (200, 150)
+
+
+    roads_inp = dict()
+
+    roads_inp["i1_r12_i2"] = ("i1","i2")
+    roads_inp["i2_r12_i1"] = ("i2","i1")
+
+    roads_inp["i2_r23_i3"] = ("i2","i3")
+    roads_inp["i3_r23_i2"] = ("i3","i2")
+
+    roads_inp["i4_r45_i5"] = ("i4","i5")
+    roads_inp["i5_r45_i4"] = ("i5","i4")
+
+    roads_inp["i5_r56_i6"] = ("i5","i6")
+    roads_inp["i6_r56_i5"] = ("i6","i5")
+
+    roads_inp["i7_r78_i8"] = ("i7","i8")
+    roads_inp["i8_r78_i7"] = ("i8","i7")
+
+    roads_inp["i8_r89_i9"] = ("i8","i9")
+    roads_inp["i9_r89_i8"] = ("i9","i8")
+
+    roads_inp["i10_r1011_i11"] = ("i10","i11")
+    roads_inp["i11_r11011_i10"] = ("i11","i10")
+
+    roads_inp["i11_r1112_i12"] = ("i11","i12")
+    roads_inp["i12_r1112_i11"] = ("i12","i11")
+
+    roads_inp["i5_r52_i2"] = ("i5","i2")
+    roads_inp["i2_r52_i5"] = ("i2","i5")
+
+    roads_inp["i2_r28_i8"] = ("i2","i8")
+    roads_inp["i8_r28_i2"] = ("i8","i2")
+
+    roads_inp["i8_r811_i11"] = ("i8","i11")
+    roads_inp["i11_r811_i8"] = ("i11","i8")
+
+    roads_inp["i5_r511_i11"] = ("i5","i11")
+    roads_inp["i11_r511_i5"] = ("i11","i5")
+
+    traffic_graph, intersections_table, roads_table = convert_to_traffic_graph(intersections_inp, roads_inp)
+
+    return traffic_graph, intersections_table, roads_table
