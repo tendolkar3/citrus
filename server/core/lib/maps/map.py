@@ -3,148 +3,247 @@ import networkx as nx
 import itertools
 import math
 import numpy as np
-from core.lib.maps.utils import constants as c
+# from core.lib.maps.utils import constants as c
 from shapely.geometry import Polygon, LineString, Point
 from core.lib.infrastructure.traffic import TrafficController
 from core.helpers import norm, perpendicular_distance_of_point_from_line
 
 
+class SubNode:
+    def __init__(self, point_x, point_y, grade=0):
+        self.__x = point_x
+        self.__y = point_y
+        self.__grade = grade
+
+    def get_x(self):
+        return self.__x
+
+    def set_x(self, x):
+        self.__x = x
+
+    def get_y(self):
+        return self.__y
+
+    def set_y(self, y):
+        self.__y = y
+
+    def get_grade(self):
+        return self.__grade
+
+    def set_grade(self, grade):
+        self.__grade = grade
+
+
+class RoadString:
+
+    def __init__(self, line_string):
+        self.__sub_nodes = None
+        self.__line_string = line_string
+        # An osm road has a line string of length n. sub_nodes will be of length n-1 (excluding the first node).
+        self.__perpendicular_segments = None
+        # n-1 segments
+        # not actually perpendicular though
+        self.__segment_headings = None
+        # n-1 segment headings
+        self.__no_sub_nodes = 0
+        self.__length_segments = None
+        self.set_attributes(line_string)
+
+    def get_line_string(self):
+        return self.__line_string
+
+    def set_attributes(self, line_string):
+        x, y = line_string.coords.xy
+        # print(line_string.coords.xy)
+        self.__sub_nodes = [SubNode(x[i], y[i]) for i in range(1, len(x))]
+        self.__segment_headings = [math.atan2(y[i]-y[i-1], x[i]-x[i-1]) for i in range(1, len(x))]
+        # print(len(self.__segment_headings), list(range(1, len(x)-1)))
+        self.__perpendicular_segments = [self.get_perpendicular_segment(
+            self.__segment_headings[i], self.__segment_headings[i+1], (x[i], y[i]))
+            for i in range(len(self.__segment_headings)-1)]
+        self.__perpendicular_segments.append(self.get_perpendicular_segment(
+            self.__segment_headings[len(x)-2], self.__segment_headings[len(x)-2], (x[-1], y[-1])))
+        self.__no_sub_nodes = len(self.__sub_nodes)
+        self.__length_segments = [norm((x[i]-x[i-1], y[i]-y[i-1])) for i in range(1, len(x))]
+
+    @staticmethod
+    def get_perpendicular_segment(theta1, theta2, point):
+        x, y = point
+        slope = math.tan((theta1 + theta2) / 2)
+        c = y - slope * x
+        return 1, -slope, -c
+
+    def get_subnodes(self):
+        return self.__sub_nodes
+
+    def get_perpendicular_segments(self):
+        return self.__perpendicular_segments
+
+    def get_no_sub_nodes(self):
+        return self.__no_sub_nodes
+
+    def get_segment_headings(self):
+        return self.__segment_headings
+
+    def get_segment_lengths(self):
+        return self.__length_segments
+
+
 class Node:
-    def __init__(self, point_x, point_y, grade=0, id_=None, parent=None):
-        self._X = point_x
-        self._Y = point_y
-        self._grade = grade
-        self._parent = parent
-        self._id = id_
-        self._type = 'node'
-        self._traffic_signals = dict().fromkeys(range(3))
+    def __init__(self, point_x, point_y, incoming, grade=0, _id=None, parent=None):
+        """
+
+        :param point_x:
+        :param point_y:
+        :param incoming: True or False
+        :param grade:
+        :param _id:
+        :param parent:
+        """
+        self.__x = point_x
+        self.__y = point_y
+        self.__grade = grade
+        self.__parent = parent
+        self.__id = _id
+        self.__traffic_signals = None
+        self.__incoming = incoming
+        # self._traffic_signals = dict().fromkeys(range(3))
+
+    def get_x(self):
+        return self.__x
+
+    def set_x(self, x):
+        self.__x = x
+
+    def get_y(self):
+        return self.__y
+
+    def set_y(self, y):
+        self.__y = y
+
+    def get_grade(self):
+        return self.__grade
+
+    def set_grade(self, grade):
+        self.__grade = grade
+
+    def get_id(self):
+        return self.__id
+
+    def set_id(self, _id):
+        self.__id = _id
+
+    def is_incoming(self):
+        return self.__incoming
+
+
+class Intersection:
+    def __init__(self, point_x, point_y, grade=0, osmid=None, traffic_controller=None):
+        self.__x = point_x
+        self.__y = point_y
+        self.__grade = grade
+        self.__osmid = osmid
+        self.__type = None
+        self.__nodes = []
+        self.__traffic_controller = traffic_controller
+
+    def get_x(self):
+        return self.__x
+
+    def set_x(self, x):
+        self.__x = x
+
+    def get_y(self):
+        return self.__y
+
+    def set_y(self, y):
+        self.__y = y
+
+    def get_grade(self):
+        return self.__grade
+
+    def set_grade(self, grade):
+        self.__grade = grade
+
+    def get_osmid(self):
+        return self.__osmid
+
+    def set_osmid(self, osmid):
+        self.__osmid = osmid
+
+    def get_nodes(self):
+        return self.__nodes
+
+    def add_node(self, node):
+        self.__nodes.append(node)
+
+    def get_traffic_controller(self):
+        return self.__traffic_controller
 
 
 class Lane:
-    def __init__(self, polygon, line_string, lane_no, _type=None, road=None, speed_limit=c.SPEED_LIMIT):
+    """
+    using the data structure to store the traffic in order of distance from end node
+    """
+    def __init__(self, lane_no, road, _type=None):
 
-        self.lane_polygon = polygon
-        self.lane_center = line_string
-        self.lane_no = lane_no
-        self.lane_type = _type
-        self.road = road
-        self.speed_limit = speed_limit
-        self.name = str(self.road.name)+"-lmsp-" + str(self.speed_limit)
-        x, y = self.lane_center.coords.xy
-        self.start_x = x[0]
-        self.start_y = y[0]
-        self.end_x = x[-1]
-        self.end_y = y[-1]
+        self.__vehicles = []
+        self.__lane_no = lane_no
+        self.__lane_type = _type
+        self.__road = road
+
+    def insert_vehicle(self, vehicle):
+
+        # todo: remove the dependency on vehicle methods. Should be able to calculate it from vehicle x,y
+        """
+        This method has to be on car. Just use the distance from road_end as an attribute on car. Use that to sort
+        seg_lengths = road_string.get_segment_lengths()
+        next_perpendicular_segment = road_string.get_perpendicular_segments()[segment_no]
+        a, b, c = next_perpendicular_segment
+        x, y = vehicle.get_x(), vehicle.get_y()
+        distance = sum(seg_lengths[segment_no+1:]) + abs(a*y + b*x + c)/math.sqrt(a**2 + b**2)
+        """
+        distance = vehicle.get_distance_from_road_end()
+        for ind, v in enumerate(self.__vehicles):
+
+            if distance > v.get_distance_from_road_end():
+                pass
+            else:
+                self.__vehicles.insert(ind, vehicle)
+                break
+
+    def remove_vehicle(self, vehicle):
+
+        try:
+            self.__vehicles.remove(vehicle)
+        except ValueError:
+            print("vehicle not found in lane.__vehicles")
 
 
 class Road:
-    def __init__(self, start_node=None, end_node=None, _type='straight', no_of_lanes=c.NO_OF_LANES,
-                 lane_width=c.LANE_WIDTH, speed_limit=c.SPEED_LIMIT):
-        self.start_node = start_node
-        self.end_node = end_node
-        self.type = _type
-        self.speed_limit = speed_limit
-        self.heading = 0
-        self.length = 0
-        self.traffic_count = 0
-        self.traffic_trace = []
-        self.lane_wise_traffic = {'count': 0, 'cars': [], 'average_velocity': 0, 'variance_velocity': 0, 'velocities': []}
-        self.total_traffic = {'count': 0, 'cars': [], 'average_velocity': 0, 'variance_velocity': 0, 'velocities': []}
-        # traffic_trace is a dict of the last 50 time interval's traffic data. At each time interval, it is a dict with
-        # the above given keys, each of whose values return an empty list
+    def __init__(self, start_node, end_node, road_string, _type='straight', no_of_lanes=3, name=None,
+                 osmid=None, lane_width=4, speed_limit=50):
+        self.__start_node = start_node
+        self.__end_node = end_node
+        self.__type = _type
+        self.__speed_limit = speed_limit
+        self.__road_string = road_string
+        self.__lanes = []
+        self.__length = sum(self.__road_string.get_segment_lengths())
+        self.__name = name
+        self.__osmid = osmid
+        self.__no_of_lanes = no_of_lanes
+        self.__lane_width = lane_width
+        self.__lanes = [Lane(lane_no=i, road=self) for i in range(no_of_lanes)]
 
-        # ToDo: add more traffic attributes of the road like traffic traces, congestion parameters etc.
-        self.no_of_lanes = no_of_lanes
-        self.lanes = []
-        self.lane_width = lane_width
-        self.min_bounding_box = None
-        self.bounding_polygon = None
-        self.name = str(self.start_node.id) + "-" + str(self.end_node.id) + "-msp-" + str(self.speed_limit)
-        self.__calculate__()
+    def get_name(self):
+        return self.__name
 
-    def __calculate__(self):
-        diff = np.array([self.start_node.X, self.start_node.Y]) - np.array([self.end_node.X, self.end_node.Y])
-        self.length = norm(diff)
-        self.heading = math.atan2((self.end_node.Y - self.start_node.Y), (self.end_node.X - self.start_node.X))
-        self.min_bounding_box = self.get_min_bounding_box()
-        self.bounding_polygon = self.get_bounding_polygon()
-        self.__lane_polygons()
+    def get_road_length(self):
+        return self.__length
 
-    def get_bounding_polygon(self):
-        # The bounding polygon for turn roads are not consistent. The polygon partly overlaps with the adjacent straight
-        # roads. For now this is fine, but this should be corrected later.
-
-        # theta = math.atan2((self.end_node.Y-self.start_node.Y), (self.end_node.X-self.start_node.X))
-        theta = self.heading
-        w = (self.lane_width * self.no_of_lanes)/2
-        pt1 = (self.start_node.X - w * math.sin(theta), self.start_node.Y + w * math.cos(theta))
-        pt2 = (self.start_node.X + w * math.sin(theta), self.start_node.Y - w * math.cos(theta))
-
-        theta = math.atan2(-(self.end_node.Y-self.start_node.Y), -(self.end_node.X-self.start_node.X))
-        pt3 = (self.end_node.X - w * math.sin(theta), self.end_node.Y + w * math.cos(theta))
-        pt4 = (self.end_node.X + w * math.sin(theta), self.end_node.Y - w * math.cos(theta))
-
-        # print(self.start_node.id, self.end_node.id, pt1, pt2, pt3, pt4)
-
-        polygon = Polygon([pt1, pt2, pt3, pt4])
-
-        return polygon
-
-    def get_min_bounding_box(self):
-
-        polygon = self.get_bounding_polygon()
-        # print(self.start_node.id, self.end_node.id, polygon.bounds)
-        return polygon.bounds
-
-    def __lane_polygons(self):
-        # ToDo: Done: make test cases to check if the lane polygons are correct
-
-        center_linestring = LineString([(self.start_node.X, self.start_node.Y), (self.end_node.X, self.end_node.Y)])
-
-        if self.no_of_lanes % 2 == 0:
-            for ind in range(1, 1 + self.no_of_lanes//2):
-                distance = self.lane_width/2 + self.lane_width * (self.no_of_lanes/2 - ind)
-                left_linestring = center_linestring.parallel_offset(distance, 'left')
-                poly = polygon_from_linestring(left_linestring, self.lane_width/2)
-                lane = Lane(polygon=poly, line_string=left_linestring, lane_no=ind - 1, road=self)
-                self.lanes.append(lane)
-
-            for ind in range(self.no_of_lanes//2):
-                distance = self.lane_width/2 + self.lane_width * ind
-                right_linestring = center_linestring.parallel_offset(distance, 'right')
-                poly = polygon_from_linestring(right_linestring, self.lane_width/2)
-                lane = Lane(polygon=poly, line_string=right_linestring, lane_no=self.no_of_lanes//2 + ind, road=self)
-                self.lanes.append(lane)
-
-        else:
-            for ind in range(1, 1 + self.no_of_lanes // 2):
-                distance = self.lane_width * (1 + self.no_of_lanes // 2 - ind)
-                # left_linestring = center_linestring.parallel_offset(distance, 'left')
-                right_linestring = center_linestring.parallel_offset(distance, 'right')
-                x, y = right_linestring.coords.xy
-                right_linestring = LineString([(x[-1], y[-1]), (x[0], y[0])])
-
-                poly = polygon_from_linestring(right_linestring, self.lane_width / 2)
-                lane = Lane(polygon=poly, line_string=right_linestring, lane_no=ind - 1, road=self)
-                self.lanes.append(lane)
-
-            poly = polygon_from_linestring(center_linestring, self.lane_width / 2)
-            lane = Lane(polygon=poly, line_string=center_linestring, lane_no=self.no_of_lanes//2, road=self)
-            self.lanes.append(lane)
-
-            # ToDo: Shapely issue #284: parallel offset to the right returns a line string in the reverse order.
-            # ToDo: Did not find a quick fix, so manually reversing it after the parallel offset
-
-            for ind in range(self.no_of_lanes // 2):
-                distance = self.lane_width + self.lane_width * ind
-                left_linestring = center_linestring.parallel_offset(distance, 'left')
-                # right_linestring = center_linestring.parallel_offset(distance, 'right')
-                # x, y = right_linestring.coords.xy
-                # right_linestring = LineString([(x[-1], y[-1]), (x[0], y[0])])
-                poly = polygon_from_linestring(left_linestring, self.lane_width / 2)
-                lane = Lane(polygon=poly, line_string=left_linestring, lane_no=self.no_of_lanes//2 + ind + 1,
-                            road=self)
-                self.lanes.append(lane)
+    def get_road_string(self):
+        return self.__road_string
 
     def get_lane(self, x, y):
         # adding some epsilon value
@@ -280,25 +379,6 @@ class Road:
 
         if self.total_traffic['count'] > 0:
             self.traffic_trace.append(self.total_traffic)
-
-
-class Intersection:
-    def __init__(self, point_x, point_y, id_=None, int_type=None, traffic_controller=None):
-        self.X = point_x
-        self.Y = point_y
-        self.__nodes = []
-        self.type = int_type
-        self.id = id_
-        self.traffic_controller = traffic_controller
-
-    def nodes_append(self, node):
-        self.__nodes.append(node)
-
-    def get_nodes(self, ind=None):
-        if ind is not None:
-            return self.__nodes[ind]
-        else:
-            return self.__nodes
 
 
 class RoadNetwork:
