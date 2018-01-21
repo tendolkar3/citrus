@@ -7,6 +7,7 @@ import numpy as np
 from shapely.geometry import Polygon, LineString, Point
 from core.lib.infrastructure.traffic import TrafficController
 from core.helpers import norm, perpendicular_distance_of_point_from_line
+from core.lib.maps.generate_traffic_graph import create_sample_network
 
 
 class SubNode:
@@ -146,6 +147,7 @@ class Intersection:
         self.__type = None
         self.__nodes = []
         self.__traffic_controller = traffic_controller
+        self.__no_of_nodes = 0
 
     def get_x(self):
         return self.__x
@@ -176,9 +178,13 @@ class Intersection:
 
     def add_node(self, node):
         self.__nodes.append(node)
+        self.__no_of_nodes += 1
 
     def get_traffic_controller(self):
         return self.__traffic_controller
+
+    def get_no_of_nodes(self):
+        return self.__no_of_nodes
 
 
 class Lane:
@@ -381,74 +387,28 @@ class Road:
             self.traffic_trace.append(self.total_traffic)
 
 
-class RoadNetwork:
-    def __init__(self, graph=None):
-        self.__road_tree = index.Index()
-        self.__road_tree.interleaved = True
-        self._cars_table = {}
-        # ToDo: check python collections
-        # ToDo: check memcache to store the data structures (trees and hash maps)
-        self._car_tree = index.Index()
-        self._car_tree.interleaved = True
-        self.__graph = graph
-        self.__node_count = 0
-        self.__car_count = 0
-        self.renderer = RoadNetworkRenderer()
-        self.intersections_table = {}
-        self.sources = []
-        self.sinks = []
+class TrafficGraph:
+    def __init__(self):
+        self.__graph = nx.DiGraph()
+        self.__intersections_table = dict()
+        self.__roads_table = dict()
+        self.__sources = []
+        self.__sinks = []
+        self.__intersections_count = 0
+        self.__nodes_count = 0
+        self.__roads_count = 0
 
-    def create_sample_road_network(self):
+    def create_sample_network(self):
+        self.__graph, self.__intersections_table, self.__roads_table = create_sample_network()
+        self.__intersections_count = len(self.__intersections_table.keys())
+        self.__roads_count = len(self.__roads_table.keys())
+        for _, i in self.__intersections_table.items():
+            self.__nodes_count += i.get_no_nodes()
 
-        # self.__graph = build_sample()
-        self.__graph, self.intersections_table = build_sample()
-        self.__build_rtree()
-        for source in [9, 25, 27, 43, 45, 61, 77, 79, 95, 89]:
-            self.sources.append(self.get_node_attr(source))
-        for sink in [10, 26, 28, 44, 46, 62, 78, 80, 96, 90]:
-            self.sinks.append(self.get_node_attr(sink))
-
-    def __build_rtree(self):
-
-        for node in self.__graph.nodes(data='object'):
-            temp_id = node[1].id
-            temp_x = node[1].X
-            temp_y = node[1].Y
-            self.__road_tree.insert(temp_id, (temp_x, temp_y, temp_x, temp_y))
-            self.__node_count += 1
-
-            # have to decide if obj=node[1] should be included or not
-
-    def get_nearest_nodes(self, bounding_box, number, generator=True, objects=False):
-
-        if generator:
-            return self.__road_tree.nearest(bounding_box, number, objects)
-        else:
-            return list(self.__road_tree.nearest(bounding_box, number, objects))
-
-    def get_nodes_by_bounding_box(self, bounding_box, generator=True, objects=False):
-
-        if generator:
-            return self.__road_tree.nearest(bounding_box, objects)
-        else:
-            return list(self.__road_tree.nearest(bounding_box, objects))
-
-    def get_nearest_cars(self, bounding_box, number, generator=True, objects=False):
-
-        if generator:
-            return self._car_tree.nearest(bounding_box, number, objects)
-        else:
-            return list(self._car_tree.nearest(bounding_box, number, objects))
-
-    def get_cars_by_bounding_box(self, bounding_box, generator=True, objects=False):
-
-        if generator:
-            return self._car_tree.intersection(bounding_box, objects)
-        else:
-            return list(self._car_tree.intersection(bounding_box, objects))
+    def get_intersections_table(self):
+        return self.__intersections_table
 
     def get_all_nodes(self, objects=True):
-
         if objects:
             return self.__graph.nodes(data='object')
         else:
@@ -460,15 +420,13 @@ class RoadNetwork:
 
     def get_edges(self):
 
-        # returns a EdgeView containing edge. For attributes call getEdgeAttr(edge)
         return self.__graph.edges()
 
-    def get_edge_attr(self, edge):
+    def get_edge_attributes(self):
 
-        # returns a dict of the attributes
         return self.__graph.edges[edge]
 
-    def get_road(self, edge):
+    def get_road(self):
 
         return self.__graph.edges[edge]['object']
 
@@ -476,295 +434,20 @@ class RoadNetwork:
 
         return self.__graph.edges(data=True)
 
-    def get_outgoing_edges(self, node):
+    def get_outgoing_edges(self):
 
         return self.__graph.out_edges(node)
 
-    def get_incoming_edges(self, node):
+    def get_incoming_edges(self):
 
         return self.__graph.in_edges(node)
 
-    # def get_adj_edge_of_node(self, node):
-
-        # returns a dict (AtlasView).The key is the node connecting the given node
-        # return self.__graph[node]
-
-    def get_adj_nodes(self, node):
+    def get_adj_node(self):
 
         return self.__graph.adj[node]
 
-    def get_node_attr(self, node):
+    def get_node_attribute(self, node):
 
-        return self.__graph.node[node]['object']
+        return self.__graph[node]['object']
 
-    def get_node_count(self):
 
-        return self.__node_count
-
-    def get_car_count(self):
-
-        return len(self._cars_table.keys())
-        # return self.__car_count
-
-    def get_road_network_bbox(self):
-
-        return self.__road_tree.bounds
-
-    def get_car_tree_bbox(self):
-        try:
-            return self._car_tree.bounds
-        except:
-            return None
-
-    def update_traffic(self, road):
-        # Wrote the same method for a road. Duplicating it for a roadnetwork here, not using this anywhere as of now
-        # resolve the name conflict later
-
-        lane_traffic = dict.fromkeys(range(0, road.no_of_lanes), [])
-        road_traffic_count = 0
-        bounding_box = road.min_bounding_box
-        # print(bounding_box)
-        candidate_traffic = list(self._car_tree.intersection(bounding_box))
-
-        for candidate in candidate_traffic:
-            point = Point(self._cars_table[candidate].x, self._cars_table[candidate].y)
-
-            for lane in road.lanes:
-                if lane.lane_polygon.contains(point):
-                    road_traffic_count += 1
-                    lane_traffic[lane.lane_no].append(self._cars_table[candidate])
-                    lane.traffic.append(self._cars_table[candidate])
-
-        road.traffic_count = road_traffic_count
-        road.traffic = lane_traffic
-
-    def get_traffic_count_on_road(self, road):
-
-        # ToDo: check for test cases get_traffic_on_road()
-        polygon = road.get_bounding_polygon()
-        bounding_box = polygon.bounds
-        candidate_traffic = list(self._car_tree.intersection(bounding_box))
-        count = 0
-        for candidate in candidate_traffic:
-            point = Point(self._cars_table[candidate].x, self._cars_table[candidate].y)
-            if polygon.contains(point):
-                count += 1
-
-        return count
-
-    def add_car(self, car):
-
-        # if self._car_tree is None
-
-        # if car.ID is not None:
-        # car.ID = self.__car_count + 1
-        self.__car_count += 1
-
-        self._cars_table[car.ID] = car
-        self._car_tree.insert(car.ID, (car.x, car.y, car.x, car.y))
-
-    def build_car_tree(self, cars):
-
-        count = self.__car_count
-        counter = itertools.count(start=count + 1)
-        # itertools counter to generate a unique id to every new car inserted
-        for car in cars:
-            if car.ID is None:
-                car.ID = next(counter)
-                self.__car_count += 1
-
-            self.__car_count += 1
-
-            self._cars_table[car.ID] = car
-
-        self._car_tree = index.Index(self.car_generator())
-
-    def get_cars(self):
-
-        # returns a tuple containing the carid and the car object
-        for _, value in self._cars_table.items():
-            yield value
-
-    def get_car(self, car_id):
-
-        return self._cars_table[car_id]
-
-    def remove_car(self, car):
-
-        self.__car_count -= 1
-        self._car_tree.delete(car.ID, (car.x, car.y, car.x, car.y))
-        del self._cars_table[car.ID]
-
-    def car_generator(self):
-        for id_, car in self._cars_table.items():
-            yield (id_, (car.x, car.y, car.x, car.y), None)
-
-    def update_car_network(self):
-        # Used bulk upload of data into rtree. Much more faster than individual upload
-
-        # del self._car_tree
-        # self._car_tree = index.Index()
-        # self._car_tree.interleaved = True
-        #
-        # for id_, car in self._cars_table.items():
-        #     self._car_tree.insert(id_, (car.x, car.y, car.x, car.y))
-
-        del self._car_tree
-        self._car_tree = index.Index(self.car_generator())
-
-    def update_road_attributes(self, start_node_id, end_node_id, road):
-
-        features = calculate_traffic_features(road)
-        # Should return a dict, with the following keys
-        features_list = ['congestion', 'estimated_fuel_usage', 'estimated_time', 'distance']
-        # Decide on how to calculate these features.
-        for feature in features_list:
-            self.__graph[start_node_id][end_node_id][feature] = features[feature]
-
-
-def build_sample_1():
-    graph = nx.DiGraph(name='test_graph')
-    x = itertools.count()
-    intersection, x = create_plus_intersection(100, 100, x, scale=30)
-    graph = add_intersection_to_graph(graph, [intersection])
-
-    return graph
-
-
-def build_sample():
-    graph = nx.DiGraph(name='test_graph')
-    x = itertools.count(1)
-
-    i1, x = create_plus_intersection(100, 350, x, scale=45)
-    i2, x = create_plus_intersection(100, 100, x, scale=45)
-    i3, x = create_plus_intersection(350, 100, x, scale=45)
-    i4, x = create_plus_intersection(350, 350, x, scale=45)
-    i5, x = create_plus_intersection(350, 600, x, scale=45)
-    i6, x = create_plus_intersection(100, 600, x, scale=45)
-
-    intersections_table = dict()
-    intersections_table[1] = i1
-    intersections_table[2] = i2
-    intersections_table[3] = i3
-    intersections_table[4] = i4
-    intersections_table[5] = i5
-    intersections_table[6] = i6
-
-    graph = add_intersection_to_graph(graph, [i1, i2, i3, i4, i5, i6])
-
-    links = [[32, 11], [12, 31], [30, 41], [42, 29], [48, 59], [60, 47], [58, 13], [14, 57], [16, 91], [92, 15],
-             [64, 75], [76, 63], [74, 93], [94, 73]]
-
-    for link in links:
-        temp_node1 = graph.node[link[0]]['object']
-        temp_node2 = graph.node[link[1]]['object']
-        temp_road = Road(start_node=temp_node1, end_node=temp_node2)
-        graph.add_edges_from([(temp_node1.id, temp_node2.id, {'object': temp_road, 'weight': temp_road.length})])
-
-    return graph, intersections_table
-
-
-def build_random():
-    graph = nx.DiGraph(name='random')
-
-    return graph
-
-
-def create_plus_intersection(point_x, point_y, counter, scale=30):
-
-    traffic_controller = TrafficController()
-
-    intersection = Intersection(point_x, point_y, int_type='plus', traffic_controller=traffic_controller)
-    # print(intersection.traffic_controller.signals)
-
-    intersection.nodes_append(Node(point_x - 1 * scale, point_y + 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 1 * scale, point_y - 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 0.5 * scale, point_y - 1 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 0.5 * scale, point_y - 1 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 1 * scale, point_y - 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 1 * scale, point_y + 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 0.5 * scale, point_y + 1 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 0.5 * scale, point_y + 1 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 2 * scale, point_y + 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 2 * scale, point_y - 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 0.5 * scale, point_y - 2 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 0.5 * scale, point_y - 2 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 2 * scale, point_y - 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 2 * scale, point_y + 0.5 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x + 0.5 * scale, point_y + 2 * scale, id_=next(counter),
-                                   parent=intersection))
-    intersection.nodes_append(Node(point_x - 0.5 * scale, point_y + 2 * scale, id_=next(counter),
-                                   parent=intersection))
-
-    return intersection, counter
-
-
-def add_intersection_to_graph(graph, intersections):
-    # ToDo: Done: check the lane width and no of lanes for roads representing turns at intersection
-    # ToDo: perfect the addition of traffic signals. Now doing a handwavy implementation
-
-    for I in intersections:
-        for node in I.get_nodes():
-            graph.add_node(node.id, object=node)
-        turn_links = [[0, 3], [0, 5], [0, 7], [2, 5], [2, 7], [2, 1], [4, 7], [4, 1], [4, 3], [6, 1], [6, 3], [6, 5]]
-        straight_links = [[8, 0], [10, 2], [12, 4], [14, 6], [1, 9], [3, 11], [5, 13], [7, 15]]
-
-        for link in turn_links:
-            temp_node1 = I.get_nodes(link[0])
-            temp_node2 = I.get_nodes(link[1])
-            temp_road = Road(start_node=temp_node1, end_node=temp_node2, _type='turn')
-            graph.add_edges_from([(temp_node1.id, temp_node2.id, {'object': temp_road, 'weight': temp_road.length})])
-
-        for link in straight_links:
-            temp_node1 = I.get_nodes(link[0])
-            temp_node2 = I.get_nodes(link[1])
-            # This is a temporary code. We need to make it more general for any kind of intersection.
-            if link[1] in [0, 2, 4, 6]:
-                # print(type(I.traffic_controller.signals))
-                temp_node2.traffic_signals[0] = I.traffic_controller.signals[int(3 * link[1]/2)]
-                I.traffic_controller.signals[int(3 * link[1]/2)].set_node(temp_node2)
-                temp_node2.traffic_signals[1] = I.traffic_controller.signals[int(3 * link[1]/2) + 1]
-                I.traffic_controller.signals[int(3 * link[1]/2) + 1].set_node(temp_node2)
-                temp_node2.traffic_signals[2] = I.traffic_controller.signals[int(3 * link[1]/2) + 2]
-                I.traffic_controller.signals[int(3 * link[1]/2) + 2].set_node(temp_node2)
-
-                # print(temp_node2.id, temp_node2.X, temp_node2.Y)
-
-            temp_road = Road(start_node=temp_node1, end_node=temp_node2)
-            graph.add_edges_from([(temp_node1.id, temp_node2.id, {'object': temp_road, 'weight': temp_road.length})])
-
-    return graph
-
-
-def polygon_from_linestring(linestring, width_from_center):
-
-    pts = []
-    for x, y in zip(linestring.coords.xy[0], linestring.coords.xy[1]):
-        pts.append([x, y])
-
-    theta = math.atan2((pts[1][1] - pts[0][1]), (pts[1][0] - pts[0][0]))
-    w = width_from_center
-    pt1 = (pts[0][0] - w * math.sin(theta), pts[0][1] + w * math.cos(theta))
-    pt2 = (pts[0][0] + w * math.sin(theta), pts[0][1] - w * math.cos(theta))
-
-    theta = math.atan2(-(pts[1][1] - pts[0][1]), -(pts[1][0] - pts[0][0]))
-    pt3 = (pts[1][0] - w * math.sin(theta), pts[1][1] + w * math.cos(theta))
-    pt4 = (pts[1][0] + w * math.sin(theta), pts[1][1] - w * math.cos(theta))
-
-    polygon = Polygon([pt1, pt2, pt3, pt4])
-
-    return polygon
